@@ -9,6 +9,10 @@
 #define ESP_UTILS_LOG_TAG "LvPort"
 #include "esp_lib_utils.h"
 #include "lvgl_v8_port.h"
+#include "esp_heap_caps.h"
+#ifdef CONFIG_SPIRAM_SUPPORT
+#include "esp_spiram.h"
+#endif
 
 using namespace esp_panel::drivers;
 
@@ -568,8 +572,34 @@ static lv_disp_t *display_init(LCD *lcd)
 #if !LVGL_PORT_AVOID_TEAR
     // Avoid tearing function is disabled
     buffer_size = lcd_width * LVGL_PORT_BUFFER_SIZE_HEIGHT;
+    
+    // Determine allocation caps: prefer PSRAM if available, fall back to internal SRAM
+    uint32_t alloc_caps = LVGL_PORT_BUFFER_MALLOC_CAPS;
+#ifdef CONFIG_SPIRAM_SUPPORT
+    if (esp_spiram_is_initialized()) {
+        alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+        ESP_UTILS_LOGD("PSRAM detected and initialized, using PSRAM for LVGL buffers");
+    } else {
+        ESP_UTILS_LOGD("PSRAM not available, using internal SRAM for LVGL buffers");
+    }
+#else
+    ESP_UTILS_LOGD("SPIRAM support not enabled, using internal SRAM for LVGL buffers");
+#endif
+    
     for (int i = 0; (i < LVGL_PORT_BUFFER_NUM) && (i < LVGL_PORT_BUFFER_NUM_MAX); i++) {
-        lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS);
+        lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
+        
+        // If allocation failed and we were trying PSRAM, fall back to internal SRAM
+        if (lvgl_buf[i] == nullptr && (alloc_caps & MALLOC_CAP_SPIRAM)) {
+            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d] in PSRAM, falling back to internal SRAM", i);
+            alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+            lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
+        }
+        
+        // Final check - if still failed, log error and assert
+        if (lvgl_buf[i] == nullptr) {
+            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d], size: %d bytes", i, buffer_size * sizeof(lv_color_t));
+        }
         assert(lvgl_buf[i]);
         ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d", i, lvgl_buf[i], buffer_size * sizeof(lv_color_t));
     }

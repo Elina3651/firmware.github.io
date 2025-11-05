@@ -5121,6 +5121,9 @@ static void profile_detail_edit_btn_event_cb(lv_event_t * e) {
 
     Serial.println("Edit button clicked. Preparing edit screen instantly...");
     
+    // Clean up any previous profile edit screen objects before creating new ones
+    cleanup_profile_edit_screen();
+    
     // Просто напрямую вызываем функцию, которая готовит и показывает экран
     // Она быстрая, так как работает с данными из памяти
     setup_profile_edit_screen();
