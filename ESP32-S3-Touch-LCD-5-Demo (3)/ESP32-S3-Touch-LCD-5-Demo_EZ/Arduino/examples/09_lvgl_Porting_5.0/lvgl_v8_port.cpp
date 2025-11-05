@@ -5,6 +5,8 @@
  */
 
 #include "esp_timer.h"
+#include "esp_spiram.h"
+#include "esp_heap_caps.h"
 #undef ESP_UTILS_LOG_TAG
 #define ESP_UTILS_LOG_TAG "LvPort"
 #include "esp_lib_utils.h"
@@ -568,10 +570,44 @@ static lv_disp_t *display_init(LCD *lcd)
 #if !LVGL_PORT_AVOID_TEAR
     // Avoid tearing function is disabled
     buffer_size = lcd_width * LVGL_PORT_BUFFER_SIZE_HEIGHT;
+    
+    // Runtime PSRAM detection: Allocate in PSRAM when available, fallback to INTERNAL SRAM
+    uint32_t alloc_caps = LVGL_PORT_BUFFER_MALLOC_CAPS;
+    bool psram_available = false;
+    
+#ifdef CONFIG_SPIRAM
+    if (esp_spiram_is_initialized()) {
+        alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+        psram_available = true;
+        ESP_UTILS_LOGI("PSRAM detected and initialized. Allocating LVGL buffers in PSRAM.");
+    } else {
+        ESP_UTILS_LOGW("PSRAM not initialized. Falling back to INTERNAL SRAM for LVGL buffers.");
+    }
+#else
+    ESP_UTILS_LOGW("PSRAM not configured. Using INTERNAL SRAM for LVGL buffers.");
+#endif
+    
     for (int i = 0; (i < LVGL_PORT_BUFFER_NUM) && (i < LVGL_PORT_BUFFER_NUM_MAX); i++) {
-        lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS);
+        lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
+        
+        if (lvgl_buf[i] == NULL) {
+            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d] with caps 0x%x. Attempting fallback...", i, alloc_caps);
+            
+            // Fallback to INTERNAL if PSRAM allocation fails
+            if (psram_available) {
+                alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+                lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
+                if (lvgl_buf[i]) {
+                    ESP_UTILS_LOGW("Buffer[%d] fallback to INTERNAL SRAM successful.", i);
+                } else {
+                    ESP_UTILS_LOGE("FATAL: Failed to allocate LVGL buffer[%d] even in INTERNAL SRAM!", i);
+                }
+            }
+        }
+        
         assert(lvgl_buf[i]);
-        ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d", i, lvgl_buf[i], buffer_size * sizeof(lv_color_t));
+        ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d bytes, caps: 0x%x", 
+                       i, lvgl_buf[i], buffer_size * sizeof(lv_color_t), alloc_caps);
     }
 #else
     // To avoid the tearing effect, we should use at least two frame buffers: one for LVGL rendering and another for LCD refresh
