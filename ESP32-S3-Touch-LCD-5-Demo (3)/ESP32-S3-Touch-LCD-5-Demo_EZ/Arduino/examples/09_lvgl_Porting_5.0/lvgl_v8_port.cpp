@@ -5,14 +5,14 @@
  */
 
 #include "esp_timer.h"
-#undef ESP_UTILS_LOG_TAG
-#define ESP_UTILS_LOG_TAG "LvPort"
-#include "esp_lib_utils.h"
-#include "lvgl_v8_port.h"
 #include "esp_heap_caps.h"
 #ifdef CONFIG_SPIRAM_SUPPORT
 #include "esp_spiram.h"
 #endif
+#undef ESP_UTILS_LOG_TAG
+#define ESP_UTILS_LOG_TAG "LvPort"
+#include "esp_lib_utils.h"
+#include "lvgl_v8_port.h"
 
 using namespace esp_panel::drivers;
 
@@ -572,33 +572,32 @@ static lv_disp_t *display_init(LCD *lcd)
 #if !LVGL_PORT_AVOID_TEAR
     // Avoid tearing function is disabled
     buffer_size = lcd_width * LVGL_PORT_BUFFER_SIZE_HEIGHT;
-    
-    // Determine allocation caps: prefer PSRAM if available, fall back to internal SRAM
-    uint32_t alloc_caps = LVGL_PORT_BUFFER_MALLOC_CAPS;
-#ifdef CONFIG_SPIRAM_SUPPORT
-    if (esp_spiram_is_initialized()) {
-        alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-        ESP_UTILS_LOGD("PSRAM detected and initialized, using PSRAM for LVGL buffers");
-    } else {
-        ESP_UTILS_LOGD("PSRAM not available, using internal SRAM for LVGL buffers");
-    }
-#else
-    ESP_UTILS_LOGD("SPIRAM support not enabled, using internal SRAM for LVGL buffers");
-#endif
-    
     for (int i = 0; (i < LVGL_PORT_BUFFER_NUM) && (i < LVGL_PORT_BUFFER_NUM_MAX); i++) {
-        lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
-        
-        // If allocation failed and we were trying PSRAM, fall back to internal SRAM for all remaining buffers
-        if (lvgl_buf[i] == nullptr && (alloc_caps & MALLOC_CAP_SPIRAM)) {
-            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d] in PSRAM, falling back to internal SRAM for all buffers", i);
+        // По умолчанию выделяем в INTERNAL, но если PSRAM доступна — используем её
+        int alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+#ifdef CONFIG_SPIRAM_SUPPORT
+        if (esp_spiram_is_initialized()) {
+            alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+            ESP_UTILS_LOGD("PSRAM available: allocating LVGL buffer[%d] in PSRAM", i);
+        } else {
             alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-            lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
+            ESP_UTILS_LOGD("PSRAM not initialized: allocating LVGL buffer[%d] in INTERNAL SRAM", i);
         }
-        
-        // Final check - if still failed, log error and assert (preserving original behavior)
-        if (lvgl_buf[i] == nullptr) {
-            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d], size: %d bytes - out of memory", i, buffer_size * sizeof(lv_color_t));
+#else
+        ESP_UTILS_LOGD("CONFIG_SPIRAM_SUPPORT not defined: allocating LVGL buffer[%d] in INTERNAL SRAM", i);
+#endif
+        lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
+        if (!lvgl_buf[i]) {
+            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d] (size=%d bytes, caps=%d). Trying fallback to INTERNAL.", i, buffer_size * sizeof(lv_color_t), alloc_caps);
+            // Попытка fallback на внутреннюю память, если из PSRAM не получилось
+            if (alloc_caps != (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) {
+                lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                if (lvgl_buf[i]) {
+                    ESP_UTILS_LOGD("Fallback allocate INTERNAL for LVGL buffer[%d] -> %p", i, lvgl_buf[i]);
+                } else {
+                    ESP_UTILS_LOGE("Fallback allocate INTERNAL for LVGL buffer[%d] failed as well", i);
+                }
+            }
         }
         assert(lvgl_buf[i]);
         ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d", i, lvgl_buf[i], buffer_size * sizeof(lv_color_t));
