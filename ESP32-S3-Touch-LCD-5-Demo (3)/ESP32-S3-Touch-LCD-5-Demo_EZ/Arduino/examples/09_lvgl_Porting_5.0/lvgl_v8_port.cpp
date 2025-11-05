@@ -589,16 +589,16 @@ static lv_disp_t *display_init(LCD *lcd)
     for (int i = 0; (i < LVGL_PORT_BUFFER_NUM) && (i < LVGL_PORT_BUFFER_NUM_MAX); i++) {
         lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
         
-        // If allocation failed and we were trying PSRAM, fall back to internal SRAM
+        // If allocation failed and we were trying PSRAM, fall back to internal SRAM for all remaining buffers
         if (lvgl_buf[i] == nullptr && (alloc_caps & MALLOC_CAP_SPIRAM)) {
-            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d] in PSRAM, falling back to internal SRAM", i);
+            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d] in PSRAM, falling back to internal SRAM for all buffers", i);
             alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
             lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
         }
         
-        // Final check - if still failed, log error and assert
+        // Final check - if still failed, log error and assert (preserving original behavior)
         if (lvgl_buf[i] == nullptr) {
-            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d], size: %d bytes", i, buffer_size * sizeof(lv_color_t));
+            ESP_UTILS_LOGE("Failed to allocate LVGL buffer[%d], size: %d bytes - out of memory", i, buffer_size * sizeof(lv_color_t));
         }
         assert(lvgl_buf[i]);
         ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d", i, lvgl_buf[i], buffer_size * sizeof(lv_color_t));
