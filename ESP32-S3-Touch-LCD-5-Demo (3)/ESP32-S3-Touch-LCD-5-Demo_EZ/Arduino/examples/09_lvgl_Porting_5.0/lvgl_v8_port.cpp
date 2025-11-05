@@ -572,7 +572,7 @@ static lv_disp_t *display_init(LCD *lcd)
     buffer_size = lcd_width * LVGL_PORT_BUFFER_SIZE_HEIGHT;
     
     // Runtime PSRAM detection: Allocate in PSRAM when available, fallback to INTERNAL SRAM
-    uint32_t alloc_caps = LVGL_PORT_BUFFER_MALLOC_CAPS;
+    uint32_t alloc_caps;
     bool psram_available = false;
     
 #ifdef CONFIG_SPIRAM
@@ -581,9 +581,11 @@ static lv_disp_t *display_init(LCD *lcd)
         psram_available = true;
         ESP_UTILS_LOGI("PSRAM detected and initialized. Allocating LVGL buffers in PSRAM.");
     } else {
+        alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
         ESP_UTILS_LOGW("PSRAM not initialized. Falling back to INTERNAL SRAM for LVGL buffers.");
     }
 #else
+    alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     ESP_UTILS_LOGW("PSRAM not configured. Using INTERNAL SRAM for LVGL buffers.");
 #endif
     
@@ -602,11 +604,16 @@ static lv_disp_t *display_init(LCD *lcd)
                     ESP_UTILS_LOGW("Buffer[%d] fallback to INTERNAL SRAM successful.", i);
                 } else {
                     ESP_UTILS_LOGE("FATAL: Failed to allocate LVGL buffer[%d] even in INTERNAL SRAM!", i);
+                    // Cannot continue without buffers - return NULL to indicate failure
+                    return nullptr;
                 }
+            } else {
+                ESP_UTILS_LOGE("FATAL: Failed to allocate LVGL buffer[%d] in INTERNAL SRAM!", i);
+                // Cannot continue without buffers - return NULL to indicate failure
+                return nullptr;
             }
         }
         
-        assert(lvgl_buf[i]);
         ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d bytes, caps: 0x%x", 
                        i, lvgl_buf[i], buffer_size * sizeof(lv_color_t), alloc_caps);
     }
