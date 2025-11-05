@@ -596,6 +596,7 @@ static lv_disp_t *display_init(LCD *lcd)
             // Fallback to INTERNAL if PSRAM allocation fails
             if (psram_available) {
                 alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+                psram_available = false; // Ensure subsequent buffers also use internal SRAM
                 lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), alloc_caps);
                 if (lvgl_buf[i]) {
                     ESP_UTILS_LOGW("Buffer[%d] fallback to INTERNAL SRAM successful.", i);
